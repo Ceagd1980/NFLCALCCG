@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar NFL</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏈</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Barlow+Semi+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#141a3a; --panel:#1d2550; --line:#2c3670; --text:#e9ecf8; --dim:#9aa3cc;
+  --amber:#ffb547; --home:#39d0bd; --away:#ff8a7a; --win:#5fe08a; --loss:#ff6b6b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.4 "Barlow Semi Condensed",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;
+  padding:18px 20px 14px;border-bottom:2px solid var(--amber)}
+h1{margin:0;font:700 32px/1 Oswald,sans-serif;letter-spacing:.5px}
+h1 small{display:block;font:400 14px "Barlow Semi Condensed";color:var(--dim);letter-spacing:0;margin-top:4px}
+.controls{display:flex;gap:8px;align-items:center}
+input[type=date],button{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(--text);
+  border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+button{background:var(--amber);color:#1a1300;border-color:var(--amber);cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+#status{padding:10px 20px;color:var(--dim);min-height:20px}
+#status.err{color:var(--loss)}
+#status.warn{color:var(--amber)}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;padding:4px 20px 24px}
+.game{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.meta{display:flex;justify-content:space-between;gap:8px;padding:7px 12px;font-size:13px;color:var(--dim);
+  border-bottom:1px solid var(--line)}
+.teams{padding:6px 12px}
+.team{display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:8px;padding:5px 0}
+.tag{font:700 11px Oswald;text-align:center;border-radius:4px;padding:2px 0}
+.tag.h{background:var(--home);color:#062521}.tag.a{background:var(--away);color:#2b0a06}
+.name{font:600 19px/1.1 Oswald,sans-serif}
+.name .rk{color:var(--amber);font-size:14px;margin-right:4px}
+.info{display:flex;gap:10px;font-size:14px;white-space:nowrap}
+.info .pos{color:var(--dim)}
+.W{color:var(--win);font-weight:700}.L{color:var(--loss);font-weight:700}
+.boxes{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 10px}
+.box{border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.box.h{border-top:3px solid var(--home)}.box.a{border-top:3px solid var(--away)}
+.box h3{margin:0 0 3px;font:600 13px "Barlow Semi Condensed";color:var(--dim)}
+.box table{width:100%;border-collapse:collapse;font-size:14px}
+.box td{padding:1px 0}.box td:last-child{text-align:right;font-weight:700;white-space:nowrap}
+.fb{color:var(--amber);cursor:help}
+.calc{background:#171e45;border-top:1px solid var(--line);padding:9px 12px 11px}
+.calc table{width:100%;border-collapse:collapse;font-size:14px}
+.calc th{font-weight:600;color:var(--dim);text-align:right;padding:2px 4px;font-size:12px}
+.calc th:first-child,.calc td:first-child{text-align:left}
+.calc td{padding:3px 4px;text-align:right;border-top:1px solid var(--line)}
+.score{font:700 16px Oswald}
+.score .h{color:var(--home)}.score .a{color:var(--away)}
+.line{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.line b{font:700 20px Oswald;color:var(--amber)}
+.line span{color:var(--dim);font-size:13px}
+.sep{height:8px}
+.day{grid-column:1/-1;margin:10px 0 -4px;font:600 18px Oswald,sans-serif;color:var(--amber)}
+.empty{grid-column:1/-1;padding:40px 10px;text-align:center;color:var(--dim)}
+footer{padding:0 20px 28px;color:var(--dim);font-size:13px;max-width:900px}
+footer p{margin:4px 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+details{padding:0 20px 10px;color:var(--dim);font-size:13px}
+@media (max-width:420px){main{grid-template-columns:1fr;padding:4px 10px 20px}header{padding:14px 12px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Radar NFL<small>Partidos de la semana con posiciones, promedios y proyecciones de puntos</small></h1>
+  <div class="controls">
+    <label for="date" class="sr">Semana desde</label>
+    <input type="date" id="date">
+    <button id="load">Actualizar</button>
+  </div>
+</header>
+<div id="status" role="status" aria-live="polite"></div>
+<details id="warnbox" hidden><summary>Avisos de datos</summary><ul id="warnlist"></ul></details>
+<main id="games"></main>
+<footer>
+  <p>Datos: TeamRankings.com. El local se mide con sus números jugando en casa y la visita con sus números fuera. <span class="fb">*</span> = sin partidos en esa condición, se usa el promedio de la temporada.</p>
+  <p>Marcador A: local en casa vs visita fuera. B: promedio de temporada de ambos. C: últimos 3 partidos. Total = puntos local + puntos visita. Hándicap = local − visita; si es positivo, el local es favorito por esa cantidad.</p>
+</footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const fx = (d) => (v) => (v == null || !isFinite(v) ? "—" : v.toFixed(d));
+const f1 = fx(1), f2 = fx(2);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const DAYS = ["dom","lun","mar","mié","jue","vie","sáb"], MON = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+
+let DATA = null, FROM_CACHE = false;
+const CACHE_KEY = "nfl-radar:data";
+
+function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function addDays(iso, n) { const [y,m,d] = iso.split("-").map(Number); return isoOf(new Date(y, m-1, d+n)); }
+function dayTitle(iso) { const [y,m,d] = iso.split("-").map(Number); const dt = new Date(y, m-1, d); return `${DAYS[dt.getDay()]} ${d} ${MON[m-1]} ${y}`; }
+
+// Valor según condición: local usa "home", visita usa "away"; si falta, usa temporada (marcado)
+function pick(stat, side) {
+  if (!stat) return { v: null, fb: false };
+  const split = side === "home" ? stat.home : stat.away;
+  if (split != null) return { v: split, fb: false };
+  return { v: stat.season ?? null, fb: stat.season != null };
+}
+const cell = (p, fmt = f1) => p.v == null ? "—" : `${fmt(p.v)}${p.fb ? ' <span class="fb" title="Sin partidos en esta condición: promedio de temporada">*</span>' : ""}`;
+
+function spreadText(d) {
+  if (d == null || !isFinite(d)) return "—";
+  if (Math.abs(d) < 0.05) return "Pick'em";
+  return d > 0 ? `Local −${d.toFixed(1)}` : `Visita −${(-d).toFixed(1)}`;
+}
+const signed = (d) => (d == null || !isFinite(d) ? "—" : (d > 0 ? "+" : "") + d.toFixed(1));
+
+// Marcador exacto: redondea; si queda empatado, desempata a favor del promedio más alto (o del local)
+function exact(l, v) {
+  if (l == null || v == null) return null;
+  let L = Math.round(l), V = Math.round(v);
+  if (L === V) { if (l >= v) L++; else V++; }
+  return { L, V, total: l + v, diff: l - v };
+}
+
+function streakHtml(s) {
+  if (!s) return "—";
+  const c = /^W/i.test(s) ? "W" : /^L/i.test(s) ? "L" : "";
+  return `<span class="${c}">${esc(s)}</span>`;
+}
+
+function teamRow(t, side) {
+  const st = t.standing;
+  const pct = st && st.pct != null ? (st.pct * 100).toFixed(1) + "%" : "—";
+  const pos = st ? `${st.pos}º ${st.div}` : "—";
+  const rk = st && st.powerRank ? `<span class="rk">#${st.powerRank}</span>` : "";
+  return `<div class="team">
+    <span class="tag ${side === "home" ? "h" : "a"}">${side === "home" ? "LOCAL" : "VISITA"}</span>
+    <span class="name">${rk}${esc(t.name)}</span>
+    <span class="info"><span class="pos">${pos}</span><span>${pct}</span>${streakHtml(st && st.streak)}</span>
+  </div>`;
+}
+
+function box(t, side) {
+  const cls = side === "home" ? "h" : "a";
+  const title = side === "home" ? `${esc(t.name)} en casa` : `${esc(t.name)} fuera`;
+  return `<div class="box ${cls}"><h3>${title}</h3><table>
+    <tr><td>Puntos</td><td>${cell(pick(t.pts, side))}</td></tr>
+    <tr><td>Touchdowns</td><td>${cell(pick(t.td, side), f2)}</td></tr>
+    <tr><td>Yardas/punto</td><td>${cell(pick(t.ypp, side))}</td></tr>
+    <tr><td>Yardas</td><td>${cell(pick(t.yds, side))}</td></tr>
+  </table></div>`;
+}
+
+function calc(H, A) {
+  const scen = [
+    ["A · Casa/fuera", pick(H.pts, "home").v, pick(A.pts, "away").v],
+    ["B · Temporada", H.pts?.season ?? null, A.pts?.season ?? null],
+    ["C · Últimos 3", H.pts?.last3 ?? null, A.pts?.last3 ?? null],
+  ].map(([n, l, v]) => [n, exact(l, v)]);
+
+  const main = scen[0][1];
+  const lineHtml = main
+    ? `<div class="line"><div>Total puntos <b>${f1(main.total)}</b></div><div>Spread <b>${spreadText(main.diff)}</b></div></div>`
+    : `<div class="line"><span>Sin datos suficientes para la proyección</span></div>`;
+
+  const rows = scen.map(([n, s]) => s
+    ? `<tr><td>${n}</td><td class="score"><span class="h">${s.L}</span>–<span class="a">${s.V}</span></td><td>${f1(s.total)}</td><td>${signed(s.diff)}</td></tr>`
+    : `<tr><td>${n}</td><td>—</td><td>—</td><td>—</td></tr>`).join("");
+
+  const per = [["Puntos", "pts", f1], ["Touchdowns", "td", f2], ["Yardas", "yds", f1]].map(([n, k, fmt]) => {
+    const l = pick(H[k], "home").v, v = pick(A[k], "away").v;
+    const ok = l != null && v != null, d = ok ? l - v : null;
+    const sg = ok ? (d > 0 ? "+" : "") + fmt(d) : "—";
+    const sp = !ok ? "—" : Math.abs(d) < 0.005 ? "Pick'em" : d > 0 ? `Local −${fmt(d)}` : `Visita −${fmt(-d)}`;
+    return `<tr><td>${n}</td><td>${ok ? fmt(l + v) : "—"}</td><td>${sg}</td><td>${sp}</td></tr>`;
+  }).join("");
+
+  return `<div class="calc">${lineHtml}
+    <table><tr><th>Marcador posible</th><th>L–V</th><th>Total</th><th>Hándicap</th></tr>${rows}</table>
+    <div class="sep"></div>
+    <table><tr><th>Estadística</th><th>Total</th><th>Hándicap</th><th>Spread</th></tr>${per}</table>
+  </div>`;
+}
+
+// Semana a mostrar: 7 días desde la fecha elegida; si no hay partidos, la próxima fecha con juegos
+function weekGames(start) {
+  const all = (DATA.games || []).filter((g) => g.date);
+  let from = start, to = addDays(start, 6);
+  let list = all.filter((g) => g.date >= from && g.date <= to);
+  let note = "";
+  if (!list.length) {
+    const next = all.filter((g) => g.date >= start).sort((a, b) => a.date.localeCompare(b.date))[0];
+    const base = next || all.sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (base) {
+      from = next ? base.date : addDays(base.date, -6); to = next ? addDays(base.date, 6) : base.date;
+      list = all.filter((g) => g.date >= from && g.date <= to);
+      note = next ? " · sin partidos en esa semana, se muestra la siguiente" : " · se muestran los últimos partidos disponibles";
+    }
+  }
+  return { list: list.sort((a, b) => a.date.localeCompare(b.date)), from, to, note };
+}
+
+function render() {
+  const el = $("#games");
+  const st = $("#status");
+  if (!DATA) return;
+  const start = $("#date").value || isoOf(new Date());
+  const { list, from, to, note } = weekGames(start);
+  const T = DATA.teams || {};
+  const empty = { standing: null, pts: null, td: null, ypp: null, yds: null };
+
+  if (!list.length) {
+    el.innerHTML = `<div class="empty">No hay partidos de NFL en el calendario. Pulsa Actualizar más tarde.</div>`;
+  } else {
+    let html = "", day = "";
+    for (const g of list) {
+      if (g.date !== day) { day = g.date; html += `<h2 class="day">${dayTitle(day)}</h2>`; }
+      const H = { name: g.home, ...empty, ...(T[g.home] || {}) }, A = { name: g.away, ...empty, ...(T[g.away] || {}) };
+      html += `<article class="game">
+        <div class="meta"><span>${esc(g.time)}${g.location ? " · " + esc(g.location) : ""}${g.neutral ? " · neutral" : ""}</span></div>
+        <div class="teams">${teamRow(H, "home")}${teamRow(A, "away")}</div>
+        <div class="boxes">${box(H, "home")}${box(A, "away")}</div>
+        ${calc(H, A)}
+      </article>`;
+    }
+    el.innerHTML = html;
+  }
+
+  const when = new Date(DATA.updated).toLocaleString("es-EC");
+  st.className = FROM_CACHE ? "warn" : "";
+  const range = list.length ? `${dayTitle(from)} a ${dayTitle(to)}` : "";
+  st.textContent = FROM_CACHE
+    ? `No se pudo conectar con TeamRankings. Mostrando datos guardados del ${when}.`
+    : `${list.length} partido(s) ${range ? "del " + range : ""}${note} · actualizado ${when}`;
+
+  const w = DATA.warnings || [];
+  $("#warnbox").hidden = !w.length;
+  $("#warnlist").innerHTML = w.map((x) => `<li>${esc(x)}</li>`).join("");
+}
+
+async function load() {
+  const btn = $("#load");
+  btn.disabled = true; btn.textContent = "Cargando…";
+  $("#status").className = ""; $("#status").textContent = "Leyendo TeamRankings…";
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    const r = await fetch("/api/nfl", { signal: ctrl.signal });
+    clearTimeout(t);
+    let data;
+    try { data = await r.json(); } catch { throw new Error(`respuesta no válida (HTTP ${r.status})`); }
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch {}
+    DATA = data; FROM_CACHE = false;
+    render();
+  } catch (e) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch {}
+    if (saved) { DATA = saved; FROM_CACHE = true; render(); }
+    else {
+      $("#games").innerHTML = "";
+      $("#status").className = "err";
+      $("#status").textContent = `No se pudieron cargar los datos: ${e.name === "AbortError" ? "tiempo de espera agotado" : e.message}. Pulsa Actualizar para reintentar.`;
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = "Actualizar";
+  }
+}
+
+$("#date").value = isoOf(new Date());
+$("#load").addEventListener("click", load);
+$("#date").addEventListener("change", () => (DATA ? render() : load()));
+load();
+</script>
+</body>
+</html>
