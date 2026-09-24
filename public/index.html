@@ -70,6 +70,7 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:
 .pl td:nth-child(2){color:var(--dim);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl tr.side td{border-top:0;padding-top:6px;font-weight:700;text-align:left}
 .pl tr.side.h td{color:var(--home)}.pl tr.side.a td{color:var(--away)}
+.pl td.none{max-width:none;white-space:normal}
 .pl .none{color:var(--dim);font-size:13px;text-align:left}
 .empty{grid-column:1/-1;padding:40px 10px;text-align:center;color:var(--dim)}
 footer{padding:0 20px 28px;color:var(--dim);font-size:13px;max-width:900px}
@@ -106,6 +107,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<"
 const DAYS = ["dom","lun","mar","mié","jue","vie","sáb"], MON = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 
 let DATA = null, FROM_CACHE = false;
+// Jugadores: llegan en una llamada aparte (/api/nfl?part=players)
+let PLAYERS = null, PLAYERS_STATE = "loading", PLAYERS_ERR = "", PLAYERS_WARN = [];
+const PCACHE_KEY = "nfl-radar:players";
 const CACHE_KEY = "nfl-radar:data";
 
 function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
@@ -218,7 +222,12 @@ const nint = (v) => (v == null || !isFinite(v) ? "—" : Number.isInteger(v) ? S
 function playersBox(H, A) {
   const part = (t, cls) => {
     const head = `<tr class="side ${cls}"><td colspan="7">${esc(t.name)}</td></tr>`;
-    if (!t.players || !t.players.length) return head + `<tr><td colspan="7" class="none">Sin datos de jugadores</td></tr>`;
+    if (!t.players || !t.players.length) {
+      const msg = PLAYERS_STATE === "loading" ? "Cargando jugadores…"
+        : PLAYERS_STATE === "error" ? "No se pudieron cargar los jugadores (ver Avisos de datos arriba)"
+        : "Sin datos de jugadores";
+      return head + `<tr><td colspan="7" class="none">${msg}</td></tr>`;
+    }
     return head + t.players.map((p) =>
       `<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td title="${esc(p.team)}">${esc(String(p.team).trim().split(/\s+/).pop())}</td>` +
       `<td>${nint(p.td)}</td><td>${nint(p.rush)}</td><td>${nint(p.pass)}</td><td>${nint(p.fg)}</td><td>${nint(p.punt)}</td></tr>`).join("");
@@ -244,6 +253,8 @@ function render() {
     for (const g of list) {
       if (g.date !== day) { day = g.date; html += `<h2 class="day">${dayTitle(day)}</h2>`; }
       const H = { name: g.home, ...empty, ...(T[g.home] || {}) }, A = { name: g.away, ...empty, ...(T[g.away] || {}) };
+      H.players = (PLAYERS && H.key && PLAYERS[H.key]) || null;
+      A.players = (PLAYERS && A.key && PLAYERS[A.key]) || null;
       html += `<article class="game">
         <div class="meta"><span>${esc(g.time)}${g.location ? " · " + esc(g.location) : ""}${g.neutral ? " · neutral" : ""}</span></div>
         <div class="teams">${teamRow(H, "home")}${teamRow(A, "away")}</div>
@@ -262,7 +273,7 @@ function render() {
     ? `No se pudo conectar con TeamRankings. Mostrando datos guardados del ${when}.`
     : `${list.length} partido(s) ${range ? "del " + range : ""}${note} · actualizado ${when}`;
 
-  const w = DATA.warnings || [];
+  const w = [...(DATA.warnings || []), ...PLAYERS_WARN];
   $("#warnbox").hidden = !w.length;
   $("#warnlist").innerHTML = w.map((x) => `<li>${esc(x)}</li>`).join("");
 }
@@ -299,7 +310,34 @@ async function load() {
 $("#date").value = isoOf(new Date());
 $("#load").addEventListener("click", load);
 $("#date").addEventListener("change", () => (DATA ? render() : load()));
+async function loadPlayers() {
+  PLAYERS_STATE = "loading"; if (DATA) render();
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    const r = await fetch("/api/nfl?part=players", { signal: ctrl.signal });
+    clearTimeout(t);
+    let data;
+    try { data = await r.json(); } catch { throw new Error(`respuesta no válida (HTTP ${r.status})`); }
+    PLAYERS_WARN = data.warnings || [];
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    PLAYERS = data.players; PLAYERS_STATE = "ok";
+    try { localStorage.setItem(PCACHE_KEY, JSON.stringify(data)); } catch {}
+  } catch (e) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(PCACHE_KEY) || "null"); } catch {}
+    if (saved && saved.players) { PLAYERS = saved.players; PLAYERS_STATE = "ok"; PLAYERS_WARN.push("Jugadores: se muestran datos guardados"); }
+    else {
+      PLAYERS_STATE = "error"; PLAYERS_ERR = e.name === "AbortError" ? "tiempo de espera agotado" : e.message;
+      if (!PLAYERS_WARN.length) PLAYERS_WARN = [`Jugadores: ${PLAYERS_ERR}`];
+    }
+  }
+  if (DATA) render();
+}
+
 load();
+loadPlayers();
+$("#load").addEventListener("click", loadPlayers);
 </script>
 </body>
 </html>
