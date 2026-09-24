@@ -405,12 +405,49 @@ const json = (body, status, extra = {}) =>
     headers: { "Content-Type": "application/json; charset=utf-8", ...extra },
   });
 
+// Los 32 equipos como los escribe TeamRankings en calendario y estadísticas
+const NFL_TEAMS = ["Arizona", "Atlanta", "Baltimore", "Buffalo", "Carolina", "Chicago", "Cincinnati",
+  "Cleveland", "Dallas", "Denver", "Detroit", "Green Bay", "Houston", "Indianapolis", "Jacksonville",
+  "Kansas City", "LA Chargers", "LA Rams", "Las Vegas", "Miami", "Minnesota", "New England",
+  "New Orleans", "NY Giants", "NY Jets", "Philadelphia", "Pittsburgh", "San Francisco", "Seattle",
+  "Tampa Bay", "Tennessee", "Washington"];
+
+// /api/nfl?part=players — jugadores de los 32 equipos, en una llamada aparte
+// (así no compite con las 6 páginas de equipos por el tiempo límite de Netlify)
+async function playersResponse() {
+  const warnings = [];
+  const res = await Promise.allSettled(PLAYER_KEYS.map((k) => getHtml(PLAYER_STATS[k], 2, 4000)));
+  let players = {};
+  res.forEach((r, i) => {
+    const k = PLAYER_KEYS[i];
+    if (r.status !== "fulfilled") { warnings.push(`jugadores ${k}: ${r.reason?.message || r.reason}`); players[k] = null; return; }
+    try { players[k] = parsePlayers(r.value); } catch (e) { warnings.push(`jugadores ${k}: ${e.message}`); players[k] = null; }
+  });
+  const known = new Set(NFL_TEAMS.map((t) => key(t)));
+  const sample = PLAYER_KEYS.map((k) => players[k]).filter(Boolean).slice(0, 1)
+    .flatMap((m) => Object.values(m).slice(0, 3).map((x) => Object.values(x)[0].team));
+  players = remapAllPlayers(players, known);
+  const byTeam = {};
+  for (const k of known) { const list = teamPlayers(players, k); if (list) byTeam[k] = list; }
+  if (PLAYER_KEYS.some((k) => players[k]) && !Object.keys(byTeam).length)
+    warnings.push(`Jugadores: las tablas cargaron pero ningún equipo coincidió. Ej.: ${sample.join(", ")}`);
+  const ok = Object.keys(byTeam).length > 0;
+  return json({ ok, updated: new Date().toISOString(), players: byTeam, warnings, error: ok ? undefined : "No se pudieron cargar los jugadores" },
+    ok ? 200 : 502,
+    ok ? {
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Netlify-CDN-Cache-Control": "public, durable, s-maxage=1800, stale-while-revalidate=3600",
+      "Netlify-Vary": "query=part",
+    } : { "Cache-Control": "no-store" });
+}
+
 export default async (req) => {
-  if (req && new URL(req.url).searchParams.get("debug") === "players")
+  const q = req ? new URL(req.url).searchParams : new URLSearchParams();
+  if (q.get("debug") === "players")
     return json(await debugPlayers(), 200, { "Cache-Control": "no-store" });
-  const names = ["schedule", "standings", ...STAT_KEYS, ...PLAYER_KEYS.map((k) => `p_${k}`)];
-  const urlOf = (k) => (k.startsWith("p_") ? PLAYER_STATS[k.slice(2)] : URLS[k]);
-  const results = await Promise.allSettled(names.map((k) => getHtml(urlOf(k))));
+  if (q.get("part") === "players") return playersResponse();
+  const names = ["schedule", "standings", ...STAT_KEYS];
+  const results = await Promise.allSettled(names.map((k) => getHtml(URLS[k])));
 
   const warnings = [];
   const html = {};
@@ -438,27 +475,13 @@ export default async (req) => {
   const stats = {};
   for (const k of STAT_KEYS) stats[k] = safe(k, parseStat, html[k]);
 
-  // Jugadores
-  let players = {};
-  for (const k of PLAYER_KEYS) players[k] = safe(`p_${k}`, parsePlayers, html[`p_${k}`]);
-  const known = new Set([
-    ...STAT_KEYS.flatMap((k) => Object.keys(stats[k] || {})),
-    ...Object.keys(standings || {}),
-    ...games.flatMap((g) => [key(g.home), key(g.away)]),
-  ]);
-  const anyPlayers = PLAYER_KEYS.some((k) => players[k]);
-  const samplePlayerTeams = PLAYER_KEYS.map((k) => players[k]).filter(Boolean).slice(0, 1)
-    .flatMap((m) => Object.values(m).slice(0, 3).map((x) => Object.values(x)[0].team));
-  players = remapAllPlayers(players, known);
-  const playerTeamKeys = Object.fromEntries(
-    [...new Set(PLAYER_KEYS.flatMap((k) => Object.keys(players[k] || {})))].map((x) => [x, x]));
-
   const warned = new Set();
   const team = (name) => {
     const t = { name, standing: find(standings, name) };
     for (const k of STAT_KEYS) t[k] = find(stats[k], name);
-    const pk = find(playerTeamKeys, name);
-    t.players = pk ? teamPlayers(players, pk) : null;
+    // clave con la que la página busca a sus jugadores en /api/nfl?part=players
+    const kk = key(name);
+    t.key = NFL_TEAMS.some((x) => key(x) === kk) ? kk : (find(Object.fromEntries(NFL_TEAMS.map((x) => [key(x), key(x)])), name) || kk);
     const loaded = { standing: standings, ...stats };
     const missing = Object.keys(loaded).filter((k) => loaded[k] && !t[k]);
     if (missing.length && !warned.has(name)) {
@@ -471,8 +494,6 @@ export default async (req) => {
   // Cada equipo se envía una sola vez; los partidos solo llevan el nombre
   const teams = {};
   for (const g of games) for (const n of [g.home, g.away]) if (!teams[n]) teams[n] = team(n);
-  if (anyPlayers && games.length && !Object.values(teams).some((t) => t.players))
-    warnings.push(`Jugadores: las tablas cargaron pero ningún equipo coincidió. Ej.: ${samplePlayerTeams.join(", ")}`);
 
   return json(
     { ok: true, updated: new Date().toISOString(), games, teams, warnings },
