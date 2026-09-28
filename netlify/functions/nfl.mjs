@@ -160,14 +160,27 @@ function parseSchedule(html) {
       }
       const mm = first.match(/^(.+?)\s+(@|at|vs\.?)\s+(.+)$/i);
       if (!mm) continue;
+      // Partido jugado: TeamRankings pone el marcador junto a cada equipo ("Miami 24 @ Georgia Tech 21")
+      // o en otra celda ("24-21", "W 24-21", "Final 24-21").
+      const sc = (raw) => { const m = /\s(\d{1,3})\s*$/.exec(raw.replace(/\(\d+-\d+(-\d+)?\)/g, "").trim()); return m ? +m[1] : null; };
+      let awayScore = sc(mm[1]), homeScore = sc(mm[3]);
+      let result = "";
+      if (awayScore == null || homeScore == null) {
+        awayScore = homeScore = null;
+        const cell = r.slice(1).find((c) => /\b\d{1,3}\s*[-–]\s*\d{1,3}\b/.test(c) && !/\d{1,2}:\d{2}/.test(c));
+        if (cell) result = cell.trim();
+      }
+      const time = r[iTime] || "";
       games.push({
         date: iso,
         dateLabel,
         away: cleanTeam(mm[1]),
         home: cleanTeam(mm[3]),
         neutral: /^vs/i.test(mm[2]),
-        time: r[iTime] || "",
+        time: /final/i.test(time) || /^\D*\d{1,3}\s*[-–]\s*\d{1,3}\D*$/.test(time) ? "" : time,
         location: r[iLoc] || "",
+        awayScore, homeScore,
+        result: awayScore != null ? "" : result || (/final/i.test(time) ? time : ""),
       });
     }
   }
@@ -193,6 +206,9 @@ function parseStandings(html) {
     if (iT < 0) iT = 0;
     const iRank = idx(/^rank$/i), iWL = idx(/overall|^w-l/i), iPct = idx(/^pct$/i),
       iStreak = idx(/streak/i);
+    // Récord en casa y fuera (si la tabla trae esas columnas)
+    const iHome = idx(/^home$|^home\s*w-l/i), iRoad = idx(/^road$|^away$|^road\s*w-l|^away\s*w-l/i);
+    const rec = (c) => { const m = /^(\d+)-(\d+)(?:-(\d+))?$/.exec(String(c || "").trim()); return m ? { w: +m[1], l: +m[2], t: +(m[3] || 0), gp: +m[1] + +m[2] + +(m[3] || 0) } : null; };
 
     // División: por filas de título dentro de la tabla, o por el texto previo a la tabla
     let div = last && last[2] ? `${conf} ${ZONE[last[2].toLowerCase()]}` : null;
@@ -213,6 +229,13 @@ function parseStandings(html) {
         team: r[iT], pos, div: div || conf,
         powerRank: iRank >= 0 ? num(r[iRank]) : null,
         record: iWL >= 0 ? r[iWL] : "",
+        ...(() => {
+          // récord general = el de más partidos de la fila (así no se toma el de casa/fuera/conferencia)
+          const best = r.map(rec).filter(Boolean).sort((a, b) => b.gp - a.gp)[0];
+          return best ? { w: best.w, l: best.l, t: best.t, gp: best.gp } : {};
+        })(),
+        home: iHome >= 0 ? rec(r[iHome]) : null,
+        road: iRoad >= 0 ? rec(r[iRoad]) : null,
         pct: iPct >= 0 ? num(r[iPct]) : null,
         streak: iStreak >= 0 ? r[iStreak] : "",
       };
@@ -405,6 +428,19 @@ const json = (body, status, extra = {}) =>
     headers: { "Content-Type": "application/json; charset=utf-8", ...extra },
   });
 
+// Lista de semanas del selector "Week:" de TeamRankings (<option value="1284">Week 4 ...</option>)
+function parseWeeks(html, requested) {
+  if (!html) return [];
+  const sel = /<select[^>]*(?:week)[^>]*>([\s\S]*?)<\/select>/i.exec(html);
+  const src = sel ? sel[1] : html;
+  const out = [];
+  for (const m of src.matchAll(/<option([^>]*)value="(\d{2,6})"([^>]*)>([\s\S]*?)<\/option>/gi)) {
+    const attrs = m[1] + m[3];
+    out.push({ id: m[2], label: decode(m[4]), selected: requested ? m[2] === requested : /selected/i.test(attrs) });
+  }
+  return out;
+}
+
 // Los 32 equipos como los escribe TeamRankings en calendario y estadísticas
 const NFL_TEAMS = ["Arizona", "Atlanta", "Baltimore", "Buffalo", "Carolina", "Chicago", "Cincinnati",
   "Cleveland", "Dallas", "Denver", "Detroit", "Green Bay", "Houston", "Indianapolis", "Jacksonville",
@@ -446,8 +482,12 @@ export default async (req) => {
   if (q.get("debug") === "players")
     return json(await debugPlayers(), 200, { "Cache-Control": "no-store" });
   if (q.get("part") === "players") return playersResponse();
+  // ?week=NNNN → semana concreta del calendario de TeamRankings (pasadas o futuras)
+  const weekParam = q.get("week");
+  const week = weekParam && /^\d{1,6}$/.test(weekParam) ? weekParam : null;
   const names = ["schedule", "standings", ...STAT_KEYS];
-  const results = await Promise.allSettled(names.map((k) => getHtml(URLS[k])));
+  const urlOf = (k) => (k === "schedule" && week ? `${URLS.schedule}?week=${week}` : URLS[k]);
+  const results = await Promise.allSettled(names.map((k) => getHtml(urlOf(k))));
 
   const warnings = [];
   const html = {};
@@ -496,11 +536,12 @@ export default async (req) => {
   for (const g of games) for (const n of [g.home, g.away]) if (!teams[n]) teams[n] = team(n);
 
   return json(
-    { ok: true, updated: new Date().toISOString(), games, teams, warnings },
+    { ok: true, updated: new Date().toISOString(), games, teams, warnings, weeks: parseWeeks(html.schedule, week), week },
     200,
     {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Netlify-CDN-Cache-Control": "public, durable, s-maxage=900, stale-while-revalidate=3600",
+      "Netlify-Vary": "query=week",
     }
   );
 };
