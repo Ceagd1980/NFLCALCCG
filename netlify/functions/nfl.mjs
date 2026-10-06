@@ -473,7 +473,7 @@ async function playersResponse() {
     ok ? {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Netlify-CDN-Cache-Control": "public, durable, s-maxage=1800, stale-while-revalidate=3600",
-      "Netlify-Vary": "query=part",
+      "Netlify-Vary": "query=week|part|half",
     } : { "Cache-Control": "no-store" });
 }
 
@@ -681,7 +681,7 @@ async function formResponse(half) {
     ok && !errs.length ? {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Netlify-CDN-Cache-Control": "public, durable, s-maxage=1800, stale-while-revalidate=3600",
-      "Netlify-Vary": "query=part|half",
+      "Netlify-Vary": "query=week|part|half",
     } : { "Cache-Control": "no-store" });
 }
 
@@ -752,7 +752,7 @@ export default async (req) => {
     {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Netlify-CDN-Cache-Control": "public, durable, s-maxage=900, stale-while-revalidate=3600",
-      "Netlify-Vary": "query=week",
+      "Netlify-Vary": "query=week|part|half",
     }
   );
 };
