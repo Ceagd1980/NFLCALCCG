@@ -184,14 +184,33 @@ function frAt(list, date) {
   const last = list.filter((x) => x.date < date).slice(-5);
   return last.length ? { fr: last.reduce((n, x) => n + (x.wl === "W" ? 1 : x.wl === "L" ? -1 : 0), 0), last } : null;
 }
+let FORM_WARN = [];
 async function loadForms() {
-  try {
-    const r = await fetch("/api/nfl?part=form");
-    const data = await r.json();
-    if (data && data.teams) FORMS = data.teams;
-    if (data && data.warnings && data.warnings.length) PLAYERS_WARN.push(...data.warnings);
-  } catch (e) { PLAYERS_WARN.push(`Fuerza relativa: ${e.message}`); }
+  FORM_WARN = [];
+  // dos llamadas de 16 equipos cada una, en paralelo
+  await Promise.all(["0", "1"].map(async (h) => {
+    try {
+      const r = await fetch(`/api/nfl?part=form&half=${h}`);
+      let data;
+      try { data = await r.json(); } catch { throw new Error(`respuesta no válida (HTTP ${r.status})`); }
+      if (data && data.teams) FORMS = { ...(FORMS || {}), ...data.teams };
+      if (data && data.warnings && data.warnings.length) FORM_WARN.push(...data.warnings);
+    } catch (e) { FORM_WARN.push(`Fuerza relativa: ${e.message}`); }
+  }));
   if (DATA) render();
+}
+// Marcador de un partido ya jugado sacado de los resultados del equipo (si el calendario no lo trae)
+function scoreFromForms(g, H, A) {
+  if (g.homeScore != null || !FORMS || !g.date) return;
+  const fh = (FORMS[H.key] || []).find((x) => x.date === g.date);
+  const fa = (FORMS[A.key] || []).find((x) => x.date === g.date);
+  const src = fh || (fa && { wl: fa.wl === "W" ? "L" : fa.wl === "L" ? "W" : "T", score: fa.score });
+  const m = src && /(\d+)-(\d+)/.exec(src.score || "");
+  if (!m) return;
+  const hi = Math.max(+m[1], +m[2]), lo = Math.min(+m[1], +m[2]);
+  if (src.wl === "T") { g.homeScore = g.awayScore = hi; }
+  else [g.homeScore, g.awayScore] = src.wl === "W" ? [hi, lo] : [lo, hi];
+  g.result = "";
 }
 function teamRow(t, side) {
   const st = t.standing;
@@ -370,6 +389,7 @@ function render() {
       A.players = (PLAYERS && A.key && PLAYERS[A.key]) || null;
       H._neutral = g.neutral;
       H.form = frAt(FORMS && FORMS[H.key], g.date); A.form = frAt(FORMS && FORMS[A.key], g.date);
+      scoreFromForms(g, H, A);
       const c = g._conf, hot = c && c.p >= HI;
       const flame = c ? `<span class="flame${hot ? " hot" : ""}" title="Confianza: probabilidad 1X2 del favorito (promedio General y LL/VV). Resaltado desde 70%">🔥 ${c.side} ${(c.p * 100).toFixed(0)}%</span>` : "";
       html += `<article class="game${hot ? " hot" : ""}">
@@ -391,7 +411,7 @@ function render() {
     ? `No se pudo conectar con TeamRankings. Mostrando datos guardados del ${when}.`
     : `${list.length} partido(s) ${range ? "del " + range : ""}${note} · actualizado ${when}`;
 
-  const w = [...(DATA.warnings || []), ...PLAYERS_WARN];
+  const w = [...(DATA.warnings || []), ...PLAYERS_WARN, ...FORM_WARN];
   $("#warnbox").hidden = !w.length;
   $("#warnlist").innerHTML = w.map((x) => `<li>${esc(x)}</li>`).join("");
 }
