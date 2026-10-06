@@ -644,15 +644,22 @@ function parseResults(html, refIso) {
   return games.sort((a, b) => a.date.localeCompare(b.date));
 }
 // /api/nfl?part=form — resultados de los 32 equipos (fuerza relativa), en una llamada aparte
-async function formResponse() {
+async function formResponse(half) {
   const T0 = Date.now(), ref = ecToday();
-  const queue = [...new Set(NFL_TEAMS.map(key))], teams = {}, errs = [];
+  let all = [...new Set(NFL_TEAMS.map(key))];
+  if (half === "0" || half === "1") all = all.filter((_, i) => i % 2 === +half); // 16 equipos por llamada
+  const queue = all, teams = {}, errs = [];
+  // Direcciones reales: una dirección inexistente devuelve la lista de equipos de TeamRankings
+  if (!Object.keys(REAL_SLUGS).length) {
+    try { realSlug("x", await frFetch("https://www.teamrankings.com/nfl/team/lista-de-equipos", 3000)); } catch {}
+  }
   const worker = async () => {
     while (queue.length) {
       const k = queue.shift();
       const left = 9000 - (Date.now() - T0) - 250;
       if (left < 1000) { errs.push(`${k}: sin tiempo`); continue; }
-      const slug = slugFor(k, {});
+      const guess = slugFor(k, {});
+      const slug = guess && (REAL_SLUGS[guess.replace(/[^a-z0-9]/g, "")] || guess);
       if (!slug) { errs.push(`${k}: sin enlace`); continue; }
       try {
         let html = await frFetch(`https://www.teamrankings.com/nfl/team/${slug}`, Math.min(3500, left));
@@ -674,7 +681,7 @@ async function formResponse() {
     ok && !errs.length ? {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Netlify-CDN-Cache-Control": "public, durable, s-maxage=1800, stale-while-revalidate=3600",
-      "Netlify-Vary": "query=part",
+      "Netlify-Vary": "query=part|half",
     } : { "Cache-Control": "no-store" });
 }
 
@@ -683,7 +690,7 @@ export default async (req) => {
   if (q.get("debug") === "players")
     return json(await debugPlayers(), 200, { "Cache-Control": "no-store" });
   if (q.get("part") === "players") return playersResponse();
-  if (q.get("part") === "form") return formResponse();
+  if (q.get("part") === "form") return formResponse(q.get("half"));
   if (q.get("debug") === "team")
     return json(await debugTeam(String(q.get("slug") || "kansas-city-chiefs").replace(/[^a-z0-9-]/g, "")), 200, { "Cache-Control": "no-store" });
   // ?week=NNNN → semana concreta del calendario de TeamRankings (pasadas o futuras)
