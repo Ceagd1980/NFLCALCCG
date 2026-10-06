@@ -190,10 +190,11 @@ async function loadForms() {
   // dos llamadas de 16 equipos cada una, en paralelo
   await Promise.all(["0", "1"].map(async (h) => {
     try {
-      const r = await fetch(`/api/nfl?part=form&half=${h}`);
+      const r = await fetch(`/api/nfl?part=form&half=${h}&v=2`);
       let data;
       try { data = await r.json(); } catch { throw new Error(`respuesta no válida (HTTP ${r.status})`); }
-      if (data && data.teams) FORMS = { ...(FORMS || {}), ...data.teams };
+      // solo listas de resultados (por si llegara otra respuesta guardada en caché)
+      if (data && data.teams) for (const [k, v] of Object.entries(data.teams)) if (Array.isArray(v)) (FORMS ||= {})[k] = v;
       if (data && data.warnings && data.warnings.length) FORM_WARN.push(...data.warnings);
     } catch (e) { FORM_WARN.push(`Fuerza relativa: ${e.message}`); }
   }));
